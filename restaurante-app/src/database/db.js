@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 
 let db = null;
 if (Platform.OS !== 'web') {
-  db = SQLite.openDatabase('restaurante_pos.db');
+  db = SQLite.openDatabaseSync('restaurante_pos.db');
 }
 
 // Helper para persistencia en Web vía localStorage
@@ -23,7 +23,6 @@ const setWebStorage = (key, data) => {
   }
 };
 
-// Datos por defecto
 const defaultMenu = [
   { id: '1', nombre: 'Hamburguesa Especial', precio: 22000, categoria: 'Comida Rápida' },
   { id: '2', nombre: 'Perro Caliente XL', precio: 15000, categoria: 'Comida Rápida' },
@@ -37,7 +36,7 @@ const defaultUsuarios = [
   { id: '4', email: 'caja@restaurante.com', rol: 'CAJA' }
 ];
 
-export const initDB = () => {
+export const initDB = async () => {
   if (Platform.OS === 'web') {
     getWebStorage('@resto_menu', defaultMenu);
     getWebStorage('@resto_usuarios', defaultUsuarios);
@@ -48,240 +47,263 @@ export const initDB = () => {
 
   if (!db) return;
 
-  db.transaction(tx => {
-    tx.executeSql(
-      `CREATE TABLE IF NOT EXISTS menu (
+  try {
+
+    db.execSync(`
+      CREATE TABLE IF NOT EXISTS menu (
         id TEXT PRIMARY KEY,
         nombre TEXT NOT NULL,
         precio REAL NOT NULL,
         categoria TEXT
-      );`
-    );
-    tx.executeSql(
-      `CREATE TABLE IF NOT EXISTS usuarios (
+      );
+      CREATE TABLE IF NOT EXISTS usuarios (
         id TEXT PRIMARY KEY,
         email TEXT UNIQUE NOT NULL,
         password TEXT,
         rol TEXT NOT NULL
-      );`
-    );
-    tx.executeSql(
-      `CREATE TABLE IF NOT EXISTS ordenes (
+      );
+      CREATE TABLE IF NOT EXISTS ordenes (
         id TEXT PRIMARY KEY,
         mesa TEXT NOT NULL,
         items TEXT NOT NULL,
         estado TEXT NOT NULL,
         total REAL NOT NULL,
         hora TEXT NOT NULL
-      );`
-    );
-    tx.executeSql(
-      `CREATE TABLE IF NOT EXISTS facturas (
+      );
+      CREATE TABLE IF NOT EXISTS facturas (
         id TEXT PRIMARY KEY,
         ordenId TEXT NOT NULL,
         mesa TEXT NOT NULL,
         total REAL NOT NULL,
         metodoPago TEXT NOT NULL,
         fecha TEXT NOT NULL
-      );`
-    );
-  });
+      );
+    `);
+  } catch (error) {
+    console.error("Error inicializando la base de datos:", error);
+  }
 };
 
 // ================= FUNCIONES DE MENÚ =================
 
-export const agregarPlatilloMenu = (id, nombre, precio, categoria) => {
-  return new Promise((resolve) => {
-    const nuevoPlatillo = { id, nombre, precio: parseFloat(precio), categoria: categoria || 'General' };
-    if (Platform.OS === 'web' || !db) {
-      const menu = getWebStorage('@resto_menu', defaultMenu);
-      menu.push(nuevoPlatillo);
-      setWebStorage('@resto_menu', menu);
-      return resolve(true);
-    }
-    db.transaction(tx => {
-      tx.executeSql(
-        'INSERT INTO menu VALUES (?, ?, ?, ?)',
-        [id, nombre, parseFloat(precio), categoria || 'General'],
-        () => resolve(true)
-      );
-    });
-  });
+export const agregarPlatilloMenu = async (id, nombre, precio, categoria) => {
+  const nuevoPlatillo = { id, nombre, precio: parseFloat(precio), categoria: categoria || 'General' };
+  
+  if (Platform.OS === 'web' || !db) {
+    const menu = getWebStorage('@resto_menu', defaultMenu);
+    menu.push(nuevoPlatillo);
+    setWebStorage('@resto_menu', menu);
+    return true;
+  }
+
+  try {
+    await db.runAsync(
+      'INSERT INTO menu (id, nombre, precio, categoria) VALUES (?, ?, ?, ?)',
+      [id, nombre, parseFloat(precio), categoria || 'General']
+    );
+    return true;
+  } catch (error) {
+    console.error("Error agregando platillo:", error);
+    return false;
+  }
 };
 
-export const actualizarPlatilloMenu = (id, nombre, precio, categoria) => {
-  return new Promise((resolve) => {
-    if (Platform.OS === 'web' || !db) {
-      let menu = getWebStorage('@resto_menu', defaultMenu);
-      menu = menu.map(item => item.id === id ? { id, nombre, precio: parseFloat(precio), categoria } : item);
-      setWebStorage('@resto_menu', menu);
-      return resolve(true);
-    }
-    db.transaction(tx => {
-      tx.executeSql(
-        'UPDATE menu SET nombre = ?, precio = ?, categoria = ? WHERE id = ?',
-        [nombre, parseFloat(precio), categoria || 'General', id],
-        () => resolve(true)
-      );
-    });
-  });
+export const actualizarPlatilloMenu = async (id, nombre, precio, categoria) => {
+  if (Platform.OS === 'web' || !db) {
+    let menu = getWebStorage('@resto_menu', defaultMenu);
+    menu = menu.map(item => item.id === id ? { id, nombre, precio: parseFloat(precio), categoria } : item);
+    setWebStorage('@resto_menu', menu);
+    return true;
+  }
+
+  try {
+    await db.runAsync(
+      'UPDATE menu SET nombre = ?, precio = ?, categoria = ? WHERE id = ?',
+      [nombre, parseFloat(precio), categoria || 'General', id]
+    );
+    return true;
+  } catch (error) {
+    console.error("Error actualizando platillo:", error);
+    return false;
+  }
 };
 
-export const obtenerMenu = () => {
-  return new Promise((resolve) => {
-    if (Platform.OS === 'web' || !db) {
-      return resolve(getWebStorage('@resto_menu', defaultMenu));
-    }
-    db.transaction(tx => {
-      tx.executeSql('SELECT * FROM menu', [], (_, { rows }) => resolve(rows._array));
-    });
-  });
+export const obtenerMenu = async () => {
+  if (Platform.OS === 'web' || !db) {
+    return getWebStorage('@resto_menu', defaultMenu);
+  }
+
+  try {
+    const result = await db.getAllAsync('SELECT * FROM menu');
+    return result;
+  } catch (error) {
+    console.error("Error obteniendo menú:", error);
+    return [];
+  }
 };
 
 // ================= FUNCIONES DE USUARIOS / EMPLEADOS =================
 
-export const guardarUsuarioLocal = (id, email, password, rol) => {
-  return new Promise((resolve) => {
-    if (Platform.OS === 'web' || !db) {
-      const usuarios = getWebStorage('@resto_usuarios', defaultUsuarios);
-      const existe = usuarios.findIndex(u => u.id === id || u.email === email);
-      if (existe >= 0) {
-        usuarios[existe] = { id: usuarios[existe].id, email, rol };
-      } else {
-        usuarios.push({ id, email, rol });
-      }
-      setWebStorage('@resto_usuarios', usuarios);
-      return resolve(true);
+export const guardarUsuarioLocal = async (id, email, password, rol) => {
+  if (Platform.OS === 'web' || !db) {
+    const usuarios = getWebStorage('@resto_usuarios', defaultUsuarios);
+    const existe = usuarios.findIndex(u => u.id === id || u.email === email);
+    if (existe >= 0) {
+      usuarios[existe] = { id: usuarios[existe].id, email, rol };
+    } else {
+      usuarios.push({ id, email, rol });
     }
-    db.transaction(tx => {
-      tx.executeSql(
-        'INSERT OR REPLACE INTO usuarios (id, email, password, rol) VALUES (?, ?, ?, ?)',
-        [id, email, password, rol],
-        () => resolve(true)
-      );
-    });
-  });
+    setWebStorage('@resto_usuarios', usuarios);
+    return true;
+  }
+
+  try {
+    await db.runAsync(
+      'INSERT OR REPLACE INTO usuarios (id, email, password, rol) VALUES (?, ?, ?, ?)',
+      [id, email, password, rol]
+    );
+    return true;
+  } catch (error) {
+    console.error("Error guardando usuario:", error);
+    return false;
+  }
 };
 
-export const obtenerUsuarios = () => {
-  return new Promise((resolve) => {
-    if (Platform.OS === 'web' || !db) {
-      return resolve(getWebStorage('@resto_usuarios', defaultUsuarios));
-    }
-    db.transaction(tx => {
-      tx.executeSql('SELECT id, email, rol FROM usuarios', [], (_, { rows }) => resolve(rows._array));
-    });
-  });
+export const obtenerUsuarios = async () => {
+  if (Platform.OS === 'web' || !db) {
+    return getWebStorage('@resto_usuarios', defaultUsuarios);
+  }
+
+  try {
+    const result = await db.getAllAsync('SELECT id, email, rol FROM usuarios');
+    return result;
+  } catch (error) {
+    console.error("Error obteniendo usuarios:", error);
+    return [];
+  }
 };
 
-export const actualizarUsuarioLocal = (id, email, rol) => {
-  return new Promise((resolve) => {
-    if (Platform.OS === 'web' || !db) {
-      let usuarios = getWebStorage('@resto_usuarios', defaultUsuarios);
-      usuarios = usuarios.map(u => u.id === id ? { ...u, email, rol } : u);
-      setWebStorage('@resto_usuarios', usuarios);
-      return resolve(true);
-    }
-    db.transaction(tx => {
-      tx.executeSql(
-        'UPDATE usuarios SET email = ?, rol = ? WHERE id = ?',
-        [email, rol, id],
-        () => resolve(true)
-      );
-    });
-  });
+export const actualizarUsuarioLocal = async (id, email, rol) => {
+  if (Platform.OS === 'web' || !db) {
+    let usuarios = getWebStorage('@resto_usuarios', defaultUsuarios);
+    usuarios = usuarios.map(u => u.id === id ? { ...u, email, rol } : u);
+    setWebStorage('@resto_usuarios', usuarios);
+    return true;
+  }
+
+  try {
+    await db.runAsync(
+      'UPDATE usuarios SET email = ?, rol = ? WHERE id = ?',
+      [email, rol, id]
+    );
+    return true;
+  } catch (error) {
+    console.error("Error actualizando usuario:", error);
+    return false;
+  }
 };
 
-// ================= FUNCIONES DE ÓRDENES (MESERO / COCINA) =================
 
-export const crearOrdenLocal = (nuevaOrden) => {
-  return new Promise((resolve) => {
-    if (Platform.OS === 'web' || !db) {
-      const ordenes = getWebStorage('@resto_ordenes', []);
-      ordenes.unshift(nuevaOrden);
-      setWebStorage('@resto_ordenes', ordenes);
-      return resolve(true);
-    }
-    db.transaction(tx => {
-      tx.executeSql(
-        'INSERT INTO ordenes VALUES (?, ?, ?, ?, ?, ?)',
-        [nuevaOrden.id, nuevaOrden.mesa, JSON.stringify(nuevaOrden.items), nuevaOrden.estado, nuevaOrden.total, nuevaOrden.hora],
-        () => resolve(true)
-      );
-    });
-  });
+export const crearOrdenLocal = async (nuevaOrden) => {
+  if (Platform.OS === 'web' || !db) {
+    const ordenes = getWebStorage('@resto_ordenes', []);
+    ordenes.unshift(nuevaOrden);
+    setWebStorage('@resto_ordenes', ordenes);
+    return true;
+  }
+
+  try {
+    await db.runAsync(
+      'INSERT INTO ordenes (id, mesa, items, estado, total, hora) VALUES (?, ?, ?, ?, ?, ?)',
+      [nuevaOrden.id, nuevaOrden.mesa, JSON.stringify(nuevaOrden.items), nuevaOrden.estado, nuevaOrden.total, nuevaOrden.hora]
+    );
+    return true;
+  } catch (error) {
+    console.error("Error creando orden:", error);
+    return false;
+  }
 };
 
-export const obtenerOrdenes = () => {
-  return new Promise((resolve) => {
-    if (Platform.OS === 'web' || !db) {
-      return resolve(getWebStorage('@resto_ordenes', []));
-    }
-    db.transaction(tx => {
-      tx.executeSql('SELECT * FROM ordenes', [], (_, { rows }) => {
-        const parsed = rows._array.map(item => ({
-          ...item,
-          items: typeof item.items === 'string' ? JSON.parse(item.items) : item.items
-        }));
-        resolve(parsed);
-      });
-    });
-  });
+export const obtenerOrdenes = async () => {
+  if (Platform.OS === 'web' || !db) {
+    return getWebStorage('@resto_ordenes', []);
+  }
+
+  try {
+    const rows = await db.getAllAsync('SELECT * FROM ordenes');
+    const parsed = rows.map(item => ({
+      ...item,
+      items: typeof item.items === 'string' ? JSON.parse(item.items) : item.items
+    }));
+    return parsed;
+  } catch (error) {
+    console.error("Error obteniendo órdenes:", error);
+    return [];
+  }
 };
 
-export const actualizarEstadoOrden = (idOrden, nuevoEstado) => {
-  return new Promise((resolve) => {
-    if (Platform.OS === 'web' || !db) {
-      let ordenes = getWebStorage('@resto_ordenes', []);
-      ordenes = ordenes.map(o => o.id === idOrden ? { ...o, estado: nuevoEstado } : o);
-      setWebStorage('@resto_ordenes', ordenes);
-      return resolve(true);
-    }
-    db.transaction(tx => {
-      tx.executeSql(
-        'UPDATE ordenes SET estado = ? WHERE id = ?',
-        [nuevoEstado, idOrden],
-        () => resolve(true)
-      );
-    });
-  });
+export const actualizarEstadoOrden = async (idOrden, nuevoEstado) => {
+  if (Platform.OS === 'web' || !db) {
+    let ordenes = getWebStorage('@resto_ordenes', []);
+    ordenes = ordenes.map(o => o.id === idOrden ? { ...o, estado: nuevoEstado } : o);
+    setWebStorage('@resto_ordenes', ordenes);
+    return true;
+  }
+
+  try {
+    await db.runAsync(
+      'UPDATE ordenes SET estado = ? WHERE id = ?',
+      [nuevoEstado, idOrden]
+    );
+    return true;
+  } catch (error) {
+    console.error("Error actualizando estado de la orden:", error);
+    return false;
+  }
 };
 
 // ================= FUNCIONES DE FACTURACIÓN (CAJA) =================
 
-export const guardarFacturaLocal = (nuevaFactura) => {
-  return new Promise((resolve) => {
-    if (Platform.OS === 'web' || !db) {
-      const facturas = getWebStorage('@resto_facturas', []);
-      facturas.unshift(nuevaFactura);
-      setWebStorage('@resto_facturas', facturas);
-      
-      // Marcar orden como PAGADA
-      let ordenes = getWebStorage('@resto_ordenes', []);
-      ordenes = ordenes.map(o => o.id === nuevaFactura.ordenId ? { ...o, estado: 'PAGADO' } : o);
-      setWebStorage('@resto_ordenes', ordenes);
+export const guardarFacturaLocal = async (nuevaFactura) => {
+  if (Platform.OS === 'web' || !db) {
+    const facturas = getWebStorage('@resto_facturas', []);
+    facturas.unshift(nuevaFactura);
+    setWebStorage('@resto_facturas', facturas);
+    
+    // Marcar orden como PAGADA
+    let ordenes = getWebStorage('@resto_ordenes', []);
+    ordenes = ordenes.map(o => o.id === nuevaFactura.ordenId ? { ...o, estado: 'PAGADO' } : o);
+    setWebStorage('@resto_ordenes', ordenes);
 
-      return resolve(true);
-    }
-    db.transaction(tx => {
-      tx.executeSql(
-        'INSERT INTO facturas VALUES (?, ?, ?, ?, ?, ?)',
-        [nuevaFactura.id, nuevaFactura.ordenId, nuevaFactura.mesa, nuevaFactura.total, nuevaFactura.metodoPago, nuevaFactura.fecha],
-        () => {
-          tx.executeSql('UPDATE ordenes SET estado = ? WHERE id = ?', ['PAGADO', nuevaFactura.ordenId], () => resolve(true));
-        }
-      );
-    });
-  });
+    return true;
+  }
+
+  try {
+    await db.runAsync(
+      'INSERT INTO facturas (id, ordenId, mesa, total, metodoPago, fecha) VALUES (?, ?, ?, ?, ?, ?)',
+      [nuevaFactura.id, nuevaFactura.ordenId, nuevaFactura.mesa, nuevaFactura.total, nuevaFactura.metodoPago, nuevaFactura.fecha]
+    );
+    await db.runAsync(
+      'UPDATE ordenes SET estado = ? WHERE id = ?',
+      ['PAGADO', nuevaFactura.ordenId]
+    );
+    return true;
+  } catch (error) {
+    console.error("Error guardando factura:", error);
+    return false;
+  }
 };
 
-export const obtenerFacturas = () => {
-  return new Promise((resolve) => {
-    if (Platform.OS === 'web' || !db) {
-      return resolve(getWebStorage('@resto_facturas', []));
-    }
-    db.transaction(tx => {
-      tx.executeSql('SELECT * FROM facturas', [], (_, { rows }) => resolve(rows._array));
-    });
-  });
+export const obtenerFacturas = async () => {
+  if (Platform.OS === 'web' || !db) {
+    return getWebStorage('@resto_facturas', []);
+  }
+
+  try {
+    const result = await db.getAllAsync('SELECT * FROM facturas');
+    return result;
+  } catch (error) {
+    console.error("Error obteniendo facturas:", error);
+    return [];
+  }
 };

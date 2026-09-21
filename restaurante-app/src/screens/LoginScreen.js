@@ -33,7 +33,7 @@ export default function LoginScreen({ navigation }) {
 
     // 2. INTENTO DE CONEXIÓN AL BACKEND
     try {
-      const res = await fetch('http://10.142.51.187:3000/api/login', {
+      const res = await fetch('http://172.29.240.1:3000/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: emailClean, password })
