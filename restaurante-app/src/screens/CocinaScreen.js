@@ -1,26 +1,54 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { obtenerOrdenes, actualizarEstadoOrden } from '../database/db';
+import { obtenerOrdenesApi, actualizarEstadoOrdenApi } from '../services/api';
 
 export default function CocinaScreen({ navigation, userEmail }) {
   const [ordenes, setOrdenes] = useState([]);
 
-  // Carga inicial y actualización automática cada 3 segundos
+  // Carga inicial y actualización automática cada 4 segundos
   useEffect(() => {
     cargarOrdenes();
-    const interval = setInterval(cargarOrdenes, 3000);
+    const interval = setInterval(cargarOrdenes, 4000);
     return () => clearInterval(interval);
   }, []);
 
   const cargarOrdenes = async () => {
-    const ordenesData = await obtenerOrdenes();
+    // Intentar consultar API online; si falla, usa SQLite local
+    const resApi = await obtenerOrdenesApi();
+    let data = [];
+    if (resApi.success) {
+      data = resApi.data || [];
+    } else {
+      const ordenesLocal = await obtenerOrdenes();
+      data = ordenesLocal || [];
+    }
+
+    // Asegurar que los items de cada orden estén parseados correctamente a objeto/array
+    const ordenesProcesadas = data.map(orden => {
+      let itemsParsed = orden.items;
+      if (typeof itemsParsed === 'string') {
+        try {
+          itemsParsed = JSON.parse(itemsParsed);
+        } catch (e) {
+          itemsParsed = [];
+        }
+      }
+      return { ...orden, items: Array.isArray(itemsParsed) ? itemsParsed : [] };
+    });
+
     // Filtramos para mostrar solo las órdenes que no han sido pagadas aún
-    const ordenesActivas = (ordenesData || []).filter(o => o.estado !== 'PAGADO');
+    const ordenesActivas = ordenesProcesadas.filter(o => o.estado !== 'PAGADO');
     setOrdenes(ordenesActivas);
   };
 
   const cambiarEstado = async (idOrden, nuevoEstado) => {
+    // 1. Intentar actualizar en el servidor online
+    await actualizarEstadoOrdenApi(idOrden, nuevoEstado);
+
+    // 2. Actualizar en SQLite local
     await actualizarEstadoOrden(idOrden, nuevoEstado);
+
     await cargarOrdenes();
   };
 
@@ -69,7 +97,7 @@ export default function CocinaScreen({ navigation, userEmail }) {
               <ScrollView style={styles.itemsScroll} nestedScrollEnabled={true}>
                 {orden.items && orden.items.map((item, idx) => (
                   <Text key={idx} style={styles.itemText}>
-                    • <Text style={styles.itemNombre}>{item.nombre}</Text>
+                    • <Text style={styles.itemNombre}>{item.nombre || item.cantidad ? `${item.cantidad || 1}x ` : ''}{item.nombre || item}</Text>
                   </Text>
                 ))}
               </ScrollView>

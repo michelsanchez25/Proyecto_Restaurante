@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ScrollView, Alert, Modal, TextInput } from 'react-native';
 import { obtenerOrdenes, actualizarEstadoOrden } from '../database/db';
+import { obtenerOrdenesApi, actualizarEstadoOrdenApi } from '../services/api';
 
 export default function FacturacionScreen({ navigation, userEmail }) {
   const [ordenesPendientes, setOrdenesPendientes] = useState([]);
@@ -16,17 +17,36 @@ export default function FacturacionScreen({ navigation, userEmail }) {
 
   useEffect(() => {
     cargarOrdenes();
-    const interval = setInterval(cargarOrdenes, 3000);
+    const interval = setInterval(cargarOrdenes, 4000);
     return () => clearInterval(interval);
   }, []);
 
   const cargarOrdenes = async () => {
-    const ordenesData = await obtenerOrdenes();
-    const data = ordenesData || [];
+    // Intentar consultar API online; si falla, usa SQLite local
+    const resApi = await obtenerOrdenesApi();
+    let data = [];
+    if (resApi.success) {
+      data = resApi.data || [];
+    } else {
+      const ordenesLocal = await obtenerOrdenes();
+      data = ordenesLocal || [];
+    }
     
-    // Separar en órdenes pendientes y facturas cobradas
-    setOrdenesPendientes(data.filter(o => o.estado !== 'PAGADO'));
-    setHistorialFacturas(data.filter(o => o.estado === 'PAGADO'));
+    // Asegurar que los items de cada orden estén parseados correctamente a objeto/array
+    const ordenesProcesadas = data.map(orden => {
+      let itemsParsed = orden.items;
+      if (typeof itemsParsed === 'string') {
+        try {
+          itemsParsed = JSON.parse(itemsParsed);
+        } catch (e) {
+          itemsParsed = [];
+        }
+      }
+      return { ...orden, items: Array.isArray(itemsParsed) ? itemsParsed : [] };
+    });
+
+    setOrdenesPendientes(ordenesProcesadas.filter(o => o.estado !== 'PAGADO'));
+    setHistorialFacturas(ordenesProcesadas.filter(o => o.estado === 'PAGADO'));
   };
 
   const handleAbrirFactura = (orden) => {
@@ -58,13 +78,14 @@ export default function FacturacionScreen({ navigation, userEmail }) {
       fechaPago: new Date().toLocaleString()
     };
 
-    // 1. Guardar y actualizar el estado de la orden a PAGADO
+    // 1. Intentar actualizar en el servidor online
+    await actualizarEstadoOrdenApi(ordenSeleccionada.id, 'PAGADO', datosFactura);
+
+    // 2. Actualizar en SQLite local
     await actualizarEstadoOrden(ordenSeleccionada.id, 'PAGADO', datosFactura);
 
-    // 2. Cerrar el modal para regresar a la pantalla de facturación
     setModalVisible(false);
 
-    // 3. Mostrar el mensaje de éxito y limpiar el formulario
     Alert.alert(
       'Factura emitida con éxito',
       `Factura generada para ${ordenSeleccionada.mesa}\nTotal: $${total}\nMétodo: ${metodoPago}\nCambio: $${datosFactura.cambio}`,
@@ -73,7 +94,7 @@ export default function FacturacionScreen({ navigation, userEmail }) {
           text: 'Aceptar',
           onPress: () => {
             setOrdenSeleccionada(null);
-            setVistaActual('COBRAR'); // Retorna a la pantalla principal de facturación/cobro
+            setVistaActual('COBRAR');
             cargarOrdenes();
           }
         }
@@ -132,7 +153,7 @@ export default function FacturacionScreen({ navigation, userEmail }) {
                 <View style={styles.cardHeader}>
                   <View>
                     <Text style={styles.mesaTitle}>{orden.mesa}</Text>
-                    <Text style={styles.horaText}> {orden.hora || 'Reciente'}</Text>
+                    <Text style={styles.horaText}>{orden.hora || 'Reciente'}</Text>
                   </View>
                   <Text style={[
                     styles.badgeEstado,
@@ -147,8 +168,8 @@ export default function FacturacionScreen({ navigation, userEmail }) {
                 <ScrollView style={styles.itemsScroll} nestedScrollEnabled={true}>
                   {orden.items && orden.items.map((item, idx) => (
                     <View key={idx} style={styles.itemRow}>
-                      <Text style={styles.itemNombre}>{item.nombre}</Text>
-                      <Text style={styles.itemPrecio}>${item.precio}</Text>
+                      <Text style={styles.itemNombre}>{item.cantidad ? `${item.cantidad}x ` : ''}{item.nombre || item}</Text>
+                      <Text style={styles.itemPrecio}>${item.precio || 0}</Text>
                     </View>
                   ))}
                 </ScrollView>
@@ -177,7 +198,7 @@ export default function FacturacionScreen({ navigation, userEmail }) {
         <ScrollView contentContainerStyle={styles.gridContainer} keyboardShouldPersistTaps="handled">
           {historialFacturas.length === 0 ? (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}> No se han registrado facturas todavía.</Text>
+              <Text style={styles.emptyText}>No se han registrado facturas todavía.</Text>
             </View>
           ) : (
             historialFacturas.map((orden) => (
@@ -201,8 +222,8 @@ export default function FacturacionScreen({ navigation, userEmail }) {
                 <ScrollView style={styles.itemsScroll} nestedScrollEnabled={true}>
                   {orden.items && orden.items.map((item, idx) => (
                     <View key={idx} style={styles.itemRow}>
-                      <Text style={styles.itemNombre}>{item.nombre}</Text>
-                      <Text style={styles.itemPrecio}>${item.precio}</Text>
+                      <Text style={styles.itemNombre}>{item.cantidad ? `${item.cantidad}x ` : ''}{item.nombre || item}</Text>
+                      <Text style={styles.itemPrecio}>${item.precio || 0}</Text>
                     </View>
                   ))}
                 </ScrollView>
@@ -234,6 +255,7 @@ export default function FacturacionScreen({ navigation, userEmail }) {
               <TextInput 
                 style={styles.inputForm}
                 placeholder="Ej: Juan Pérez / Consumidor Final"
+                placeholderTextColor="#888"
                 value={clienteNombre}
                 onChangeText={setClienteNombre}
               />
@@ -244,6 +266,7 @@ export default function FacturacionScreen({ navigation, userEmail }) {
               <TextInput 
                 style={styles.inputForm}
                 placeholder="Ej: 123456789"
+                placeholderTextColor="#888"
                 value={clienteDocumento}
                 onChangeText={setClienteDocumento}
               />
@@ -368,7 +391,6 @@ const styles = StyleSheet.create({
   btnFacturar: { backgroundColor: '#16a34a', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
   btnFacturarText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
 
-  // MODAL FACTURACIÓN
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { width: '85%', maxWidth: 450, backgroundColor: '#ffffff', borderRadius: 12, padding: 20, elevation: 5 },
   modalTitle: { fontSize: 20, fontWeight: 'bold', color: '#0f172a', textAlign: 'center' },
@@ -376,7 +398,7 @@ const styles = StyleSheet.create({
 
   formGroup: { marginBottom: 10 },
   labelForm: { fontSize: 12, fontWeight: 'bold', color: '#334155', marginBottom: 4 },
-  inputForm: { borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 6, padding: 8, fontSize: 13, backgroundColor: '#f8fafc' },
+  inputForm: { borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 6, padding: 8, fontSize: 13, backgroundColor: '#f8fafc', color: '#000' },
 
   metodosContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, marginTop: 4 },
   btnMetodo: { flex: 1, paddingVertical: 8, borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 6, alignItems: 'center', marginHorizontal: 2, backgroundColor: '#f8fafc' },

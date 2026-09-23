@@ -8,6 +8,14 @@ import {
   obtenerUsuarios, 
   actualizarUsuarioLocal 
 } from '../database/db';
+import { 
+  obtenerMenuApi, 
+  agregarPlatilloMenuApi, 
+  actualizarPlatilloMenuApi, 
+  obtenerUsuariosApi, 
+  registrarUsuarioApi, 
+  actualizarUsuarioApi 
+} from '../services/api';
 
 export default function AdminScreen({ setModuloActivo }) {
   const [seccionActiva, setSeccionActiva] = useState('menu');
@@ -31,11 +39,23 @@ export default function AdminScreen({ setModuloActivo }) {
   }, []);
 
   const cargarDatos = async () => {
-    const menuData = await obtenerMenu();
-    setMenuItems(menuData || []);
+    // Sincronizar Menú (API con fallback a SQLite)
+    const resMenuApi = await obtenerMenuApi();
+    if (resMenuApi.success) {
+      setMenuItems(resMenuApi.data || []);
+    } else {
+      const menuData = await obtenerMenu();
+      setMenuItems(menuData || []);
+    }
 
-    const usuariosData = await obtenerUsuarios();
-    setEmpleados(usuariosData || []);
+    // Sincronizar Empleados (API con fallback a SQLite)
+    const resUserApi = await obtenerUsuariosApi();
+    if (resUserApi.success) {
+      setEmpleados(resUserApi.data || []);
+    } else {
+      const usuariosData = await obtenerUsuarios();
+      setEmpleados(usuariosData || []);
+    }
   };
 
   const handleGuardarPlatillo = async () => {
@@ -43,11 +63,28 @@ export default function AdminScreen({ setModuloActivo }) {
       return Alert.alert('Atención', 'Ingresa el nombre y precio del platillo');
     }
 
+    const idPlatillo = editandoPlatilloId || Date.now().toString();
+
     if (editandoPlatilloId) {
+      // 1. Online API
+      await actualizarPlatilloMenuApi(editandoPlatilloId, {
+        nombre: nombrePlatillo,
+        precio: parseFloat(precioPlatillo),
+        categoria: categoriaPlatillo
+      });
+      // 2. Local SQLite
       await actualizarPlatilloMenu(editandoPlatilloId, nombrePlatillo, precioPlatillo, categoriaPlatillo);
       Alert.alert('Éxito', 'Platillo actualizado correctamente');
     } else {
-      await agregarPlatilloMenu(Date.now().toString(), nombrePlatillo, precioPlatillo, categoriaPlatillo);
+      // 1. Online API
+      await agregarPlatilloMenuApi({
+        id: idPlatillo,
+        nombre: nombrePlatillo,
+        precio: parseFloat(precioPlatillo),
+        categoria: categoriaPlatillo
+      });
+      // 2. Local SQLite
+      await agregarPlatilloMenu(idPlatillo, nombrePlatillo, precioPlatillo, categoriaPlatillo);
       Alert.alert('Éxito', 'Platillo agregado al menú');
     }
 
@@ -74,7 +111,15 @@ export default function AdminScreen({ setModuloActivo }) {
       return Alert.alert('Atención', 'Ingresa el correo del empleado');
     }
 
+    const nuevoId = editandoUsuarioId || Date.now().toString();
+
     if (editandoUsuarioId) {
+      // 1. Online API
+      await actualizarUsuarioApi(editandoUsuarioId, {
+        email: emailEmp,
+        rol: rolEmp
+      });
+      // 2. Local SQLite
       await actualizarUsuarioLocal(editandoUsuarioId, emailEmp, rolEmp);
       Alert.alert('Éxito', 'Datos del empleado actualizados');
     } else {
@@ -82,7 +127,14 @@ export default function AdminScreen({ setModuloActivo }) {
         return Alert.alert('Atención', 'Ingresa una contraseña para el empleado');
       }
 
-      const nuevoId = Date.now().toString();
+      // 1. Online API
+      await registrarUsuarioApi({
+        id: nuevoId,
+        email: emailEmp,
+        password: passEmp,
+        rol: rolEmp
+      });
+      // 2. Local SQLite
       await guardarUsuarioLocal(nuevoId, emailEmp, passEmp, rolEmp);
       Alert.alert('Éxito', 'Empleado registrado correctamente');
     }
@@ -133,7 +185,7 @@ export default function AdminScreen({ setModuloActivo }) {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.contentArea}>
+      <ScrollView style={styles.contentArea} keyboardShouldPersistTaps="handled">
         {/* PESTAÑA: MENÚ */}
         {seccionActiva === 'menu' && (
           <View>
@@ -141,9 +193,9 @@ export default function AdminScreen({ setModuloActivo }) {
               <Text style={styles.cardTitle}>
                 {editandoPlatilloId ? 'Editar Platillo' : '+ Registrar Nuevo Platillo'}
               </Text>
-              <TextInput style={styles.input} placeholder="Nombre del Platillo" value={nombrePlatillo} onChangeText={setNombrePlatillo} />
-              <TextInput style={styles.input} placeholder="Precio ($)" value={precioPlatillo} onChangeText={setPrecioPlatillo} keyboardType="numeric" />
-              <TextInput style={styles.input} placeholder="Categoría (ej: Bebidas, Comida Rápida)" value={categoriaPlatillo} onChangeText={setCategoriaPlatillo} />
+              <TextInput style={styles.input} placeholder="Nombre del Platillo" placeholderTextColor="#888" value={nombrePlatillo} onChangeText={setNombrePlatillo} />
+              <TextInput style={styles.input} placeholder="Precio ($)" placeholderTextColor="#888" value={precioPlatillo} onChangeText={setPrecioPlatillo} keyboardType="numeric" />
+              <TextInput style={styles.input} placeholder="Categoría (ej: Bebidas, Comida Rápida)" placeholderTextColor="#888" value={categoriaPlatillo} onChangeText={setCategoriaPlatillo} />
 
               <TouchableOpacity style={styles.btnPrimary} onPress={handleGuardarPlatillo}>
                 <Text style={styles.btnText}>{editandoPlatilloId ? 'Actualizar Platillo' : 'Guardar Platillo'}</Text>
@@ -179,12 +231,12 @@ export default function AdminScreen({ setModuloActivo }) {
               <Text style={styles.cardTitle}>
                 {editandoUsuarioId ? 'Editar Datos de Empleado' : 'Registrar Nuevo Empleado'}
               </Text>
-              <TextInput style={styles.input} placeholder="Correo electrónico" value={emailEmp} onChangeText={setEmailEmp} autoCapitalize="none" />
+              <TextInput style={styles.input} placeholder="Correo electrónico" placeholderTextColor="#888" value={emailEmp} onChangeText={setEmailEmp} autoCapitalize="none" />
               {!editandoUsuarioId && (
-                <TextInput style={styles.input} placeholder="Contraseña" secureTextEntry value={passEmp} onChangeText={setPassEmp} />
+                <TextInput style={styles.input} placeholder="Contraseña" placeholderTextColor="#888" secureTextEntry value={passEmp} onChangeText={setPassEmp} />
               )}
 
-              <Text style={{ fontWeight: 'bold', marginBottom: 5 }}>Rol asignado:</Text>
+              <Text style={{ fontWeight: 'bold', marginBottom: 5, color: '#334155' }}>Rol asignado:</Text>
               <View style={styles.rolesRow}>
                 {['MESERO', 'COCINA', 'CAJA', 'ADMIN'].map((rol) => (
                   <TouchableOpacity
@@ -254,7 +306,7 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#fff', padding: 15, borderRadius: 12, elevation: 2, marginBottom: 15 },
   cardTitle: { fontSize: 16, fontWeight: 'bold', color: '#0d47a1', marginBottom: 12 },
   subTitle: { fontSize: 14, fontWeight: 'bold', color: '#333', marginBottom: 10, marginTop: 5 },
-  input: { borderWidth: 1, borderColor: '#cfd8dc', padding: 10, borderRadius: 8, marginBottom: 10, backgroundColor: '#fafafa' },
+  input: { borderWidth: 1, borderColor: '#cfd8dc', padding: 10, borderRadius: 8, marginBottom: 10, backgroundColor: '#fafafa', color: '#000' },
   btnPrimary: { backgroundColor: '#0d47a1', padding: 12, borderRadius: 8, alignItems: 'center', marginTop: 10 },
   btnText: { color: '#fff', fontWeight: 'bold' },
   btnCancel: { padding: 10, alignItems: 'center', marginTop: 5 },
@@ -262,7 +314,7 @@ const styles = StyleSheet.create({
   btnNav: { backgroundColor: '#eceff1', padding: 14, borderRadius: 8, marginTop: 10, borderWidth: 1, borderColor: '#cfd8dc' },
   btnTextNav: { color: '#0d47a1', fontWeight: 'bold', textAlign: 'center', fontSize: 15 },
   listItem: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#fff', padding: 12, borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: '#e0e0e0' },
-  itemTitle: { fontWeight: 'bold', fontSize: 14 },
+  itemTitle: { fontWeight: 'bold', fontSize: 14, color: '#1e293b' },
   itemSub: { color: '#666', fontSize: 12 },
   itemPrice: { fontWeight: 'bold', color: '#2e7d32', fontSize: 15, marginRight: 10 },
   btnEditCard: { backgroundColor: '#e8eaf6', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#0d47a1' },

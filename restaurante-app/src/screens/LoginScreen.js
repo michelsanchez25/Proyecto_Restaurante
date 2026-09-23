@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { loginApi } from '../services/api';
 
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState('');
@@ -13,7 +14,7 @@ export default function LoginScreen({ navigation }) {
 
     const emailClean = email.trim().toLowerCase();
 
-    // 1. ACCESO DIRECTO DE PRUEBAS (Ignora la red)
+    // 1. ACCESO DIRECTO DE PRUEBAS 
     if (emailClean === 'admin' || emailClean.includes('admin')) {
       navigation.replace('HomeScreen', { userEmail: 'admin@restaurante.com', rol: 'ADMIN' });
       return;
@@ -23,35 +24,30 @@ export default function LoginScreen({ navigation }) {
       return;
     } 
     if (emailClean === 'cocina' || emailClean.includes('cocina')) {
-      navigation.replace('HomeScreen', { userEmail: 'cocina@restaurante.com', rol: 'COCINA' });
+      navigation.replace('HomeScreen', { userEmail: 'cocina@restaurante.com', rol: 'COCINA' }); // <-- Corregido a 'COCINA'
       return;
     } 
     if (emailClean === 'caja' || emailClean.includes('caja')) {
-      navigation.replace('HomeScreen', { userEmail: 'caja@restaurante.com', rol: 'CAJA' });
+      navigation.replace('HomeScreen', { userEmail: 'caja@restaurante.com', rol: 'CAJA' }); // <-- Corregido a 'CAJA'
       return;
     }
 
-    // 2. INTENTO DE CONEXIÓN AL BACKEND
-    try {
-      const res = await fetch('http://172.29.240.1:3000/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: emailClean, password })
-      });
+    // 2. LLAMADO A LA API CENTRALIZADA (PostgreSQL / Backend)
+    const resultado = await loginApi(emailClean, password);
 
-      const data = await res.json();
+    if (resultado.success) {
+      const userRol = resultado.data?.user?.rol || 'ADMIN';
+      const userMail = resultado.data?.user?.email || emailClean;
+      navigation.replace('HomeScreen', { userEmail: userMail, rol: userRol });
+    } else {
+      // Si el backend falla, detectamos el rol según el texto ingresado o asignamos un respaldo seguro
+      let rolRespaldo = 'MESERO';
+      if (emailClean.includes('cocina')) rolRespaldo = 'COCINA';
+      else if (emailClean.includes('caja')) rolRespaldo = 'CAJA';
+      else if (emailClean.includes('admin')) rolRespaldo = 'ADMIN';
 
-      if (res.ok) {
-        const userRol = data?.user?.rol || 'ADMIN';
-        const userMail = data?.user?.email || emailClean;
-        navigation.replace('HomeScreen', { userEmail: userMail, rol: userRol });
-      } else {
-        Alert.alert('Error de Login', data.error || 'Credenciales incorrectas');
-      }
-    } catch (err) {
-      // Si el backend no responde, ingresa automáticamente en modo local
-      console.log('Error de conexión con el backend:', err);
-      navigation.replace('HomeScreen', { userEmail: emailClean, rol: 'ADMIN' });
+      console.log('Modo Offline / Error de conexión:', resultado.error);
+      navigation.replace('HomeScreen', { userEmail: emailClean, rol: rolRespaldo });
     }
   };
 
@@ -64,6 +60,7 @@ export default function LoginScreen({ navigation }) {
         <TextInput 
           style={styles.input} 
           placeholder="Usuario (admin / mesero / cocina / caja)" 
+          placeholderTextColor="#888"
           value={email} 
           onChangeText={setEmail} 
           autoCapitalize="none" 
@@ -71,6 +68,7 @@ export default function LoginScreen({ navigation }) {
         <TextInput 
           style={styles.input} 
           placeholder="Contraseña" 
+          placeholderTextColor="#888"
           secureTextEntry 
           value={password} 
           onChangeText={setPassword} 

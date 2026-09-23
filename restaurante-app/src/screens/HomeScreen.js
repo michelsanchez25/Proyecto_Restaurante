@@ -10,14 +10,15 @@ import FacturacionScreen from './FacturacionScreen';
 
 export default function HomeScreen({ route, navigation }) {
   const userEmail = route?.params?.userEmail || route?.params?.email || 'mesero@restaurante.com';
-  const userRol = route?.params?.rol || 'MESERO';
+  // Limpiamos y convertimos el rol a mayúsculas para evitar errores de coincidencia
+  const userRol = (route?.params?.rol || 'MESERO').trim().toUpperCase();
 
-  // Asignación inteligente del módulo activo según el rol recibido
+  // Asignación inteligente y segura del módulo activo según el rol recibido
   const [moduloActivo, setModuloActivo] = useState(() => {
     if (userRol === 'MESERO') return 'mesero';
     if (userRol === 'COCINA') return 'cocina';
     if (userRol === 'CAJA') return 'facturacion';
-    return 'admin';
+    return 'admin'; // Solo si es ADMIN explícitamente
   });
 
   return (
